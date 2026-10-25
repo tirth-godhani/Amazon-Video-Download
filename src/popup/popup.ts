@@ -78,11 +78,11 @@ function renderVideoCards(videos: VideoSource[]): void {
           Download
         </button>
       </div>
-      <div id="progress-${video.id}" class="progress-container hidden">
+      <div id="progress-${video.id}" class="progress-container hidden" style="margin-top: 8px;">
         <div class="progress-bar-container">
-          <div class="progress-bar-fill" id="fill-${video.id}"></div>
+          <div class="progress-bar-fill" id="fill-${video.id}" style="width: 0%;"></div>
         </div>
-        <div class="status-text" id="status-${video.id}">Starting download...</div>
+        <div class="status-text" id="status-${video.id}" style="margin-top: 4px; font-size: 11px;"></div>
       </div>
     `;
 
@@ -114,7 +114,11 @@ async function startSingleDownload(
   const statusEl = document.getElementById(`status-${videoId}`);
 
   if (progressEl) progressEl.classList.remove('hidden');
-  if (fillEl) fillEl.style.width = '35%';
+  if (fillEl) fillEl.style.width = '15%';
+  if (statusEl) {
+    statusEl.textContent = 'Starting download...';
+    statusEl.style.color = '#00D2D3';
+  }
 
   try {
     const res = await sendToBackground({
@@ -124,21 +128,24 @@ async function startSingleDownload(
     });
 
     if (!res.success) {
-      if (statusEl) statusEl.textContent = res.error || 'Failed';
+      if (statusEl) {
+        statusEl.textContent = res.error || 'Download failed';
+        statusEl.style.color = '#EF4444';
+      }
       if (buttonEl) {
         buttonEl.disabled = false;
         buttonEl.textContent = 'Retry';
       }
-    } else {
-      if (fillEl) fillEl.style.width = '100%';
-      if (statusEl) statusEl.textContent = 'Download started';
-      if (buttonEl) buttonEl.textContent = 'Downloading';
     }
   } catch (err) {
     logger.error('Failed to trigger download:', err);
+    if (statusEl) {
+      statusEl.textContent = String(err);
+      statusEl.style.color = '#EF4444';
+    }
     if (buttonEl) {
       buttonEl.disabled = false;
-      buttonEl.textContent = 'Download';
+      buttonEl.textContent = 'Retry';
     }
   }
 }
@@ -196,13 +203,38 @@ btnDownloadAll?.addEventListener('click', async () => {
 // Real-time download progress listener
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'DOWNLOAD_PROGRESS') {
-    const fillEl = document.getElementById(`fill-${message.jobId}`);
-    const statusEl = document.getElementById(`status-${message.jobId}`);
+    const targetId = message.videoId || message.jobId;
+    const progressEl = document.getElementById(`progress-${targetId}`);
+    const fillEl = document.getElementById(`fill-${targetId}`);
+    const statusEl = document.getElementById(`status-${targetId}`);
+    const btnEl = document.getElementById(`btn-dl-${targetId}`) as HTMLButtonElement;
+
+    if (progressEl) progressEl.classList.remove('hidden');
+
     if (fillEl && message.progress !== undefined) {
       fillEl.style.width = `${message.progress}%`;
     }
-    if (statusEl && message.status) {
-      statusEl.textContent = `${message.status} (${message.progress}%)`;
+
+    if (statusEl) {
+      if (message.status === 'complete') {
+        statusEl.textContent = 'Download complete!';
+        statusEl.style.color = '#10B981';
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = 'Done ✔';
+        }
+      } else if (message.status === 'error') {
+        statusEl.textContent = message.error || 'Failed';
+        statusEl.style.color = '#EF4444';
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = 'Retry';
+        }
+      } else {
+        statusEl.textContent =
+          message.statusText || `${message.status} (${message.progress}%)`;
+        statusEl.style.color = '#00D2D3';
+      }
     }
   }
 });

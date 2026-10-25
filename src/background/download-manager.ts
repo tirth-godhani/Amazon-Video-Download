@@ -1,5 +1,5 @@
 // ============================================================
-// Download Manager for Direct MP4 & Media Downloads
+// Download Manager for Direct MP4 & HLS Media Streams
 // ============================================================
 
 import type { DownloadJob, VideoSource } from '@/lib/types';
@@ -11,9 +11,11 @@ const logger = new Logger('DownloadManager');
 class DownloadManager {
   private jobs: Map<string, DownloadJob> = new Map();
   private chromeDownloadToJobId: Map<number, string> = new Map();
+  private blobUrlToJobId: Map<string, string> = new Map();
 
   constructor() {
     this.initDownloadListeners();
+    this.initOffscreenListeners();
   }
 
   private initDownloadListeners(): void {
@@ -42,6 +44,59 @@ class DownloadManager {
     });
   }
 
+  private initOffscreenListeners(): void {
+    if (typeof chrome === 'undefined' || !chrome.runtime?.onMessage) return;
+
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === 'HLS_PROGRESS') {
+        const job = this.jobs.get(message.jobId);
+        if (job) {
+          job.progress = message.progress;
+          job.status = message.stage === 'muxing' ? 'muxing' : 'downloading';
+          this.broadcastProgress(job, message.statusText);
+        }
+      } else if (message.type === 'HLS_COMPLETE') {
+        const job = this.jobs.get(message.jobId);
+        if (job) {
+          logger.info(`HLS transmuxing complete for job: ${job.id}, saving file`);
+          this.blobUrlToJobId.set(message.blobUrl, job.id);
+          this.triggerDownloadWithUrl(job, message.blobUrl);
+        }
+      } else if (message.type === 'HLS_ERROR') {
+        const job = this.jobs.get(message.jobId);
+        if (job) {
+          job.status = 'error';
+          job.error = message.error;
+          logger.error(`HLS processing error for job ${job.id}:`, message.error);
+          this.broadcastProgress(job);
+        }
+      }
+    });
+  }
+
+  private async ensureOffscreen(): Promise<void> {
+    if (typeof chrome === 'undefined' || !chrome.offscreen) return;
+
+    // Check if offscreen document already exists
+    if (chrome.offscreen.hasDocument && (await chrome.offscreen.hasDocument())) {
+      return;
+    }
+
+    try {
+      await chrome.offscreen.createDocument({
+        url: chrome.runtime.getURL('src/offscreen/offscreen.html'),
+        reasons: [chrome.offscreen.Reason.BLOBS],
+        justification: 'Transmux HLS video streams to MP4 Blob',
+      });
+      logger.info('Offscreen document created successfully');
+    } catch (err: unknown) {
+      const msg = String(err);
+      if (!msg.includes('Only a single offscreen document')) {
+        logger.error('Failed to create offscreen document:', msg);
+      }
+    }
+  }
+
   /**
    * Start a download for a given video and variant
    */
@@ -50,8 +105,8 @@ class DownloadManager {
     variantIndex: number
   ): Promise<DownloadJob> {
     const variant = video.variants[variantIndex] || video.variants[0];
-    if (!variant) {
-      throw new Error('No video variant available to download');
+    if (!variant || !variant.url) {
+      throw new Error('No valid video variant available to download');
     }
 
     const filename = buildFilename(
@@ -74,26 +129,55 @@ class DownloadManager {
 
     this.jobs.set(jobId, job);
 
+    const isHls = variant.url.includes('.m3u8');
+    if (isHls) {
+      // Route through offscreen HLS processor
+      logger.info(`Starting HLS stream processing for ${filename}`);
+      job.status = 'downloading';
+      this.broadcastProgress(job, 'Connecting to HLS stream...');
+
+      try {
+        await this.ensureOffscreen();
+        // Send message to offscreen document
+        chrome.runtime.sendMessage({
+          type: 'HLS_PROCESS',
+          url: variant.url,
+          jobId: job.id,
+          quality: variant.height,
+        });
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        job.status = 'error';
+        job.error = errorMsg;
+        this.broadcastProgress(job);
+      }
+      return job;
+    }
+
+    // Direct MP4 download
+    await this.triggerDownloadWithUrl(job, variant.url);
+    return job;
+  }
+
+  private async triggerDownloadWithUrl(job: DownloadJob, url: string): Promise<void> {
     try {
-      logger.info(`Initiating Chrome download: ${filename} from ${variant.url}`);
+      logger.info(`Initiating Chrome download: ${job.filename} from ${url.slice(0, 80)}...`);
       const chromeDownloadId = await chrome.downloads.download({
-        url: variant.url,
-        filename: filename,
+        url,
+        filename: job.filename,
         saveAs: false,
         conflictAction: 'uniquify',
       });
 
       job.chromeDownloadId = chromeDownloadId;
-      this.chromeDownloadToJobId.set(chromeDownloadId, jobId);
+      this.chromeDownloadToJobId.set(chromeDownloadId, job.id);
       this.broadcastProgress(job);
-      return job;
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       job.status = 'error';
       job.error = errorMsg;
-      logger.error(`Failed to initiate download for ${jobId}:`, errorMsg);
+      logger.error(`Failed to initiate download for ${job.id}:`, errorMsg);
       this.broadcastProgress(job);
-      return job;
     }
   }
 
@@ -119,15 +203,16 @@ class DownloadManager {
     return true;
   }
 
-  private broadcastProgress(job: DownloadJob): void {
-    // Notify runtime listeners (e.g. open popup)
+  private broadcastProgress(job: DownloadJob, statusText?: string): void {
     chrome.runtime.sendMessage({
       type: 'DOWNLOAD_PROGRESS',
       jobId: job.id,
+      videoId: job.videoId,
       progress: job.progress,
       status: job.status,
       filename: job.filename,
       error: job.error,
+      statusText: statusText || (job.error ? job.error : `${job.status} (${job.progress}%)`),
     }).catch(() => {
       // Ignored if popup is closed
     });
