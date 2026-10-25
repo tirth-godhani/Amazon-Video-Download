@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Amazon Video Saver</title>
+  <link rel="stylesheet" href="./popup.css" />
+</head>
+<body>
+  <div class="popup-wrapper">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20">
+            <path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+          </svg>
+        </div>
+        <div class="header-titles">
+          <h1>Amazon Video Saver</h1>
+          <span class="version-tag">v1.0</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="video-count-badge" class="badge">0</span>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="content" id="content">
+      <!-- Loading State -->
+      <div id="state-loading" class="state-container">
+        <div class="spinner"></div>
+        <p>Scanning Amazon listing for videos...</p>
+      </div>
+
+      <!-- Not Amazon State -->
+      <div id="state-not-amazon" class="state-container hidden">
+        <div class="state-icon">🛒</div>
+        <h3>No Amazon Listing Detected</h3>
+        <p>Navigate to any product page on Amazon (.com, .in, .co.uk, etc.) to discover and download videos.</p>
+      </div>
+
+      <!-- Empty State -->
+      <div id="state-empty" class="state-container hidden">
+        <div class="state-icon">🎬</div>
+        <h3>No Videos Found</h3>
+        <p>This product page does not currently contain any gallery or A+ content videos.</p>
+      </div>
+
+      <!-- Video List State -->
+      <div id="state-videos" class="state-container hidden">
+        <div class="action-bar">
+          <span id="status-summary" class="status-summary">Discovered Videos</span>
+          <button id="btn-download-all" class="btn btn-secondary btn-sm">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+            </svg>
+            Download All
+          </button>
+        </div>
+
+        <div id="video-list" class="video-list"></div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <span>High-speed MP4 video downloader</span>
+    </footer>
+  </div>
+
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>
